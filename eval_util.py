@@ -48,28 +48,38 @@ def calculate_all_points(mask, label_value):
 
 
 def calculate_scale_factor(original_affine, crop_mask_path, target_size=256):
-    # Load crop mask to determine the crop region dimensions in the original image
+    """
+    Load the crop mask, force a square bounding box, and then compute
+    a single scale factor = (side_length / target_size).
+    """
+
+    #spacing is 1x1 mm so we can ignore the affine matrix to calculate the spacing 
+    # 1. Load crop mask
     crop_mask, _ = load_nifti_with_affine(crop_mask_path)
 
-    # Since each pixel represents 1mm in the x and y directions
-    original_spacing = np.array([1.0, 1.0])
+    # 2. Identify bounding box for all non-zero pixels
+    coords = np.argwhere(crop_mask > 0)
+    x_min, y_min = coords.min(axis=0)
+    x_max, y_max = coords.max(axis=0) + 1  # +1 so x_max, y_max are exclusive
 
-    # Identify the bounding box of the region where the mask equals 1
-    coords = np.array(np.where(crop_mask == 1))
-    min_coords = coords.min(axis=1)
-    max_coords = coords.max(axis=1)
+    # 3. Force a square
+    side_length = max(x_max - x_min, y_max - y_min)
 
-    # Calculate the side lengths of the crop region in pixels
-    crop_width = max_coords[0] - min_coords[0] + 1
-    crop_height = max_coords[1] - min_coords[1] + 1
+    # Re-center so bounding box is square around the same center
+    center_x = (x_min + x_max) // 2
+    center_y = (y_min + y_max) // 2
 
-    # Calculate scaling factors for x and y axes from the original crop region to 256x256
-    scale_x = crop_width / target_size
-    scale_y = crop_height / target_size
+    x_min = max(0, center_x - side_length // 2)
+    x_max = x_min + side_length
+    y_min = max(0, center_y - side_length // 2)
+    y_max = y_min + side_length
 
-    # Use the average scale for isotropic assumption in Hausdorff calculation
-    average_scale = (scale_x + scale_y) / 2
-    return average_scale
+    # 4. Derive the scale factor
+    # Since it's square, we only need one scale factor
+    scale_factor = side_length / target_size
+
+    return scale_factor
+
 
 
 def dice_score_original(gt_mask, pred_mask, label=1):
@@ -168,8 +178,8 @@ def evaluate_hausdorff_downsampled(pred_file, gt_file, scale_factor, original_im
 
     gt_mask, _ = load_nifti_with_affine(gt_file)
     
-    binary_pred_mask = (pred_mask == 1).astype(np.uint8)
-    binary_gt_mask   = (gt_mask == 1).astype(np.uint8)
+    binary_pred_mask = (pred_mask >0).astype(np.uint8)
+    binary_gt_mask   = (gt_mask >0).astype(np.uint8)
     if binary_pred_mask.ndim == 2:
         binary_pred_mask = binary_pred_mask[:, :, np.newaxis]
     if binary_gt_mask.ndim == 2:
@@ -219,8 +229,8 @@ def evaluate_hausdorff_downsampled(pred_file, gt_file, scale_factor, original_im
 def evaluate_hausdorff_original(original_pred_mask, original_gt_mask, original_image, filename):
 
 
-    binary_pred_mask = (original_pred_mask == 1).astype(np.uint8)
-    binary_gt_mask   = (original_gt_mask == 1).astype(np.uint8)
+    binary_pred_mask = (original_pred_mask >0).astype(np.uint8)
+    binary_gt_mask   = (original_gt_mask >0).astype(np.uint8)
     if binary_pred_mask.ndim == 2:
         binary_pred_mask = binary_pred_mask[:, :, np.newaxis]
     if binary_gt_mask.ndim == 2:
@@ -484,40 +494,61 @@ def plot_masks_and_hausdorff(original_image, pred_mask, gt_mask, pred_center_2, 
 from scipy.ndimage import zoom
 
 def upscale_segmentation_to_original(segmentation, crop_mask_path, target_size=256):
+    """
+    Upscale a 256x256 segmentation back into the original image space using
+    the same approach as make_square_crop(). Specifically:
+      - Find a square bounding box in the crop mask.
+      - Compute a single scale factor = side_length / target_size.
+      - Upscale with nearest-neighbor interpolation.
+      - Place the upscaled segmentation back at the correct position
+        in the full-size mask.
+    """
+    from scipy.ndimage import zoom
+    
     # Load the crop mask to determine the original crop dimensions
     crop_mask, _ = load_nifti_with_affine(crop_mask_path)
     
     # Identify the bounding box of the region where the mask equals 1
-    coords = np.array(np.where(crop_mask == 1))
-    min_coords = coords.min(axis=1)
-    max_coords = coords.max(axis=1)
-
-    # Calculate the width and height of the crop region in the original image
-    crop_width = max_coords[0] - min_coords[0] + 1
-    crop_height = max_coords[1] - min_coords[1] + 1
-
-    # Calculate the scale factors for interpolation
-    scale_x = crop_width / target_size
-    scale_y = crop_height / target_size
-
-    # Perform the interpolation (upscale) on the segmentation label
-    # Use nearest-neighbor interpolation to maintain discrete label values
-    upscaled_segmentation = zoom(segmentation, (scale_x, scale_y), order=0)  # order=0 for nearest-neighbor
-
-    # Place the upscaled segmentation back into the original crop position
+    coords = np.argwhere(crop_mask>0)
+    x_min, y_min = coords.min(axis=0)
+    x_max, y_max = coords.max(axis=0) + 1  # +1 so x_max/y_max are exclusive
+    
+    # side_length = size of the square
+    side_length = max(x_max - x_min, y_max - y_min)
+    
+    # Adjust bounds to make sure we have a square
+    center_x = (x_min + x_max) // 2
+    center_y = (y_min + y_max) // 2
+    
+    x_min = max(0, center_x - side_length // 2)
+    x_max = x_min + side_length
+    y_min = max(0, center_y - side_length // 2)
+    y_max = y_min + side_length
+    
+    # Compute scale factor for the square bounding box
+    scale_factor = side_length / target_size
+    
+    # Nearest-neighbor interpolation preserves label values
+    upscaled_segmentation = zoom(segmentation, (scale_factor, scale_factor), order=0)
+    
     # Create an empty mask with the original image size
     full_size_mask = np.zeros_like(crop_mask)
+    
+    # Place the upscaled segmentation into the correct bounding box
+    full_size_mask[x_min : x_min + upscaled_segmentation.shape[0], 
+                   y_min : y_min + upscaled_segmentation.shape[1]] = upscaled_segmentation
+    
+    print("[UPSCALE] Computed bounding box from 'crop_mask_path':", crop_mask_path)
+    print(f"  x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, side_length={side_length}, scale_factor={scale_factor}")
 
-    # Insert the upscaled segmentation into the crop location in the original size mask
-    full_size_mask[min_coords[0]:min_coords[0]+upscaled_segmentation.shape[0], 
-                   min_coords[1]:min_coords[1]+upscaled_segmentation.shape[1]] = upscaled_segmentation
-
+    
     return full_size_mask
 
 
 
 
-def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_entry_median, interreaderName):
+
+def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_entry_median, interreaderName,annotator,mask_inference_folder):
     metrics_data= metrics_data
     metrics_entry_median= metrics_entry_median
 
@@ -553,23 +584,27 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                 parts[0], volunteer_id, 'Distortion_Corrected', divo_folder, 
                 '03_Segmentation_Images', 'Mean_Diffusivty_Image_Slice_' + slice_name
             )
-            crop_mask_path = os.path.join(
-                main_folder,
-                parts[0], volunteer_id, 'Distortion_Corrected', divo_folder,
-                '02_Crop_Masks', 'Square_Crop_Mask_Slice_' + slice_name
-            )
+            print(f'original_image_path: {original_image_path}')
+            crop_mask_filename = f"{annotator}_{volunteer_id}_{divo_folder}_slice_{slice_number}.nii.gz"
+        
+            crop_mask_path = os.path.join(mask_inference_folder, crop_mask_filename)
+            if (interreaderName is not None):
+                divo_path = f"{main_folder}/{annotator}/{volunteer_id}/Distortion_Corrected/{divo_folder}"
+                mask_folder = os.path.join(divo_path, "02_Crop_Masks")
+                gt_mask_path = os.path.join(mask_folder, f"Square_Crop_Mask_Slice_{slice_number}.nii")  # or .nii.gz?
+                crop_mask_path = gt_mask_path
             downsampled_original_image_path = os.path.join(
                 main_folder,
                 parts[0], volunteer_id, 'Distortion_Corrected', divo_folder,
                 '05_Segmentation_Images_CI', 'Cropped_Average_Diffusion_Weighted_Image_Slice_' + slice_name
             )
-            print(f'original image_path = {original_image_path}, crop mask path: {crop_mask_path}')
+            #print(f'original image_path = {original_image_path}, crop mask path: {crop_mask_path}')
             if os.path.exists(original_image_path) and os.path.exists(crop_mask_path):
                 # Load the original image
                 original_image, original_affine = load_nifti_with_affine(original_image_path)
                 
                 # Calculate scale factor
-                scale_factor = calculate_scale_factor(original_affine, crop_mask_path)
+                scale_factor  = calculate_scale_factor(original_affine, crop_mask_path)
                 
                 # Load downsampled prediction and ground truth masks
                 # These are already at 256x256
