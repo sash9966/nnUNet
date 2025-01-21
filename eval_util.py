@@ -579,12 +579,18 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
 
 
             ###CHANGE TO mean diffusivity value! FOR MEAN INSTENISTY VALUE
-            original_image_path = os.path.join(
+            original_image_path_MD = os.path.join(
                 main_folder,
                 parts[0], volunteer_id, 'Distortion_Corrected', divo_folder, 
                 '03_Segmentation_Images', 'Mean_Diffusivty_Image_Slice_' + slice_name
             )
-            print(f'original_image_path: {original_image_path}')
+            original_image_path_FA = os.path.join(
+                main_folder,
+                parts[0], volunteer_id, 'Distortion_Corrected', divo_folder, 
+                '03_Segmentation_Images', 'Fractional_Anisotropy_Image_Slice_' + slice_name
+            )
+
+            print(f'original_image_path: {original_image_path_MD}')
             crop_mask_filename = f"{annotator}_{volunteer_id}_{divo_folder}_slice_{slice_number}.nii.gz"
         
             crop_mask_path = os.path.join(mask_inference_folder, crop_mask_filename)
@@ -593,28 +599,30 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                 mask_folder = os.path.join(divo_path, "02_Crop_Masks")
                 gt_mask_path = os.path.join(mask_folder, f"Square_Crop_Mask_Slice_{slice_number}.nii")  # or .nii.gz?
                 crop_mask_path = gt_mask_path
-            downsampled_original_image_path = os.path.join(
+            downsampled_original_image_path_AVG = os.path.join(
                 main_folder,
                 parts[0], volunteer_id, 'Distortion_Corrected', divo_folder,
                 '05_Segmentation_Images_CI', 'Cropped_Average_Diffusion_Weighted_Image_Slice_' + slice_name
             )
             #print(f'original image_path = {original_image_path}, crop mask path: {crop_mask_path}')
-            if os.path.exists(original_image_path) and os.path.exists(crop_mask_path):
+            if os.path.exists(original_image_path_MD) and os.path.exists(crop_mask_path):
                 # Load the original image
-                original_image, original_affine = load_nifti_with_affine(original_image_path)
+                original_image_MD, original_affine_MD = load_nifti_with_affine(original_image_path_MD)
+                original_image_FA, original_affine_FA = load_nifti_with_affine(original_image_path_FA)
                 
                 # Calculate scale factor
-                scale_factor  = calculate_scale_factor(original_affine, crop_mask_path)
+                scale_factor  = calculate_scale_factor(original_affine_MD, crop_mask_path)
                 
                 # Load downsampled prediction and ground truth masks
                 # These are already at 256x256
                 pred_mask, _ = load_nifti_with_affine(pred_path)
                 gt_mask, _ = load_nifti_with_affine(gt_path)
-                downsampled_original_image, _ = load_nifti_with_affine(downsampled_original_image_path)
+                downsampled_original_image_AVG, _ = load_nifti_with_affine(downsampled_original_image_path_AVG)
 
 
                 # Evaluate downsampled masks
-                results_downsampled = evaluate_hausdorff_downsampled(pred_path, gt_path, scale_factor, downsampled_original_image,pred_file)
+                #No longer needed, only intersted in realphysical world coordinates, need mm! Just for plots!
+                results_downsampled = evaluate_hausdorff_downsampled(pred_path, gt_path, scale_factor, downsampled_original_image_AVG,pred_file)
 
                 
                 # Upscale masks to original dimensions
@@ -626,12 +634,13 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                                                     '01_Original_Images', f'upsampled_pred_Slice{slice_number}.nii.gz')
                 original_gt_path = os.path.join(main_folder, parts[0], volunteer_id, 'Distortion_Corrected', divo_folder,
                                                 '01_Original_Images', f'upsampled_gt_Slice_{slice_number}.nii.gz')
+                
 
-                nib.save(nib.Nifti1Image(original_pred_mask, original_affine), original_pred_path)
-                nib.save(nib.Nifti1Image(original_gt_mask, original_affine), original_gt_path)
+                nib.save(nib.Nifti1Image(original_pred_mask, original_affine_MD), original_pred_path)
+                nib.save(nib.Nifti1Image(original_gt_mask, original_affine_MD), original_gt_path)
                 
                 # Evaluate original masks
-                results_original = evaluate_hausdorff_original(original_pred_mask, original_gt_mask, original_image, pred_file)
+                results_original = evaluate_hausdorff_original(original_pred_mask, original_gt_mask, original_image_MD, pred_file)
                 hausdorff_distance_label2 = results_original.get('Hausdorff_2 (pixels/mm)', np.nan)
                 hausdorff_distance_label3 = results_original.get('Hausdorff_3 (pixels/mm)', np.nan)
                 avg_hausdorff_epi= results_original.get('Avg. HD epi',np.nan)
@@ -645,18 +654,17 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                 #dice_original_3= dice_score_original(original_gt_mask, original_pred_mask, label=3)
 
                 # Compare histograms of intensities in the segmented areas
-                gt_median, pred_median,median_percentage_difference  = histogram_comparison(original_gt_mask, original_pred_mask, original_image, label=1)
+                gt_median_MD, pred_median_MD ,median_percentage_difference_MD  = histogram_comparison(original_gt_mask, original_pred_mask, original_image_MD, label=1)
 
-                # Similar comparison for label 3
+                gt_median_FA, pred_median_FA ,median_percentage_difference_FA  = histogram_comparison(original_gt_mask, original_pred_mask, original_image_FA, label=1)
 
                 #Readjust to 1.25mm for right [mm]!
                 hausdorff_distance_label2=1.25*hausdorff_distance_label2
-                hausdorff_distance_label3=1.25*hausdorff_distance_label2
+                hausdorff_distance_label3=1.25*hausdorff_distance_label3
                 avg_hausdorff_epi=1.25*avg_hausdorff_epi
                 avg_hausdorff_endo=1.25*avg_hausdorff_endo
-                metric_entry_median= {'Case ID': case_id,
-                                        'GT_Median': gt_median,
-                                        'Pred_median':pred_median
+                metric_entry_median= {
+                                        
                 }
                 
                 metrics_entry = {
@@ -667,19 +675,23 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                     #'Dice Score Original Label 3': dice_original_3,
                     'Hausdorff Distance Label 2': hausdorff_distance_label2,
                     'Hausdorff Distance Label 3': hausdorff_distance_label3,
-                    'GT_Median': gt_median,
-                    'Pred_median':pred_median,
-                    'Mean Percentage Difference Label 1 GT': median_percentage_difference,
+                    'GT_Median_MD': gt_median_MD,
+                    'Pred_median_MD':pred_median_MD,
+                    'Mean Percentage Difference Label 1 GT MD': median_percentage_difference_MD,
+                    'GT_Median_FA': gt_median_FA,
+                    'Pred_median_FA':pred_median_FA,
+                    'Mean Percentage Difference Label 1 GT FA': median_percentage_difference_FA,
                     'Avg. HD Epi': avg_hausdorff_epi,
                     'Avg. HD Endo': avg_hausdorff_endo,
+                    
+
                 }
 
                 # Print each metric on a new line
                 print(f'metrics appending....')
                 metrics_data.append(metrics_entry)
-                metrics_entry_median.append(metric_entry_median)
             else:
-                print(f"Original or crop mask not found for {pred_file}. Expected paths:\n - Original: {original_image_path}\n - Crop Mask: {crop_mask_path}")
+                print(f"Original or crop mask not found for {pred_file}. Expected paths:\n - Original MD : {original_image_path_MD}\n - Crop Mask: {crop_mask_path}")
         else:
             print(f"No ground truth found for {pred_file}, skipping.")
 
