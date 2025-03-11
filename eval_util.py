@@ -81,6 +81,73 @@ def calculate_scale_factor(original_affine, crop_mask_path, target_size=256):
     return scale_factor
 
 
+def precision_score_(groundtruth_mask, pred_mask):
+    """
+    Calculate precision score for a binary mask comparison.
+    
+    Parameters:
+    - groundtruth_mask: Ground truth binary mask (numpy array)
+    - pred_mask: Predicted binary mask (numpy array)
+    
+    Returns:
+    - precision: Precision score rounded to 3 decimal places
+    """
+    intersect = np.sum(pred_mask * groundtruth_mask)
+    total_pixel_pred = np.sum(pred_mask)
+    if total_pixel_pred == 0:  # Handle division by zero
+        precision = 0.0 if np.sum(groundtruth_mask) > 0 else 1.0
+    else:
+        precision = intersect / total_pixel_pred
+    return round(precision, 3)
+
+def recall_score_(groundtruth_mask, pred_mask):
+    """
+    Calculate recall score for a binary mask comparison.
+    
+    Parameters:
+    - groundtruth_mask: Ground truth binary mask (numpy array)
+    - pred_mask: Predicted binary mask (numpy array)
+    
+    Returns:
+    - recall: Recall score rounded to 3 decimal places
+    """
+    intersect = np.sum(pred_mask * groundtruth_mask)
+    total_pixel_truth = np.sum(groundtruth_mask)
+    if total_pixel_truth == 0:  # Handle division by zero
+        recall = 1.0 if np.sum(pred_mask) == 0 else 0.0
+    else:
+        recall = intersect / total_pixel_truth
+    return round(recall, 3)
+
+def segmentation_f1_score(gt_mask, pred_mask, label=1):
+    """
+    Calculate the F1 Score for a specific label using provided precision and recall definitions.
+    F1 Score is the harmonic mean of precision and recall, providing a balanced measure
+    of agreement between ground truth and prediction.
+
+    Parameters:
+    - gt_mask: Ground truth mask (numpy array)
+    - pred_mask: Predicted mask (numpy array)
+    - label: The label value to evaluate (default=1)
+
+    Returns:
+    - f1: F1 Score, rounded to 3 decimal places
+    """
+    # Binarize masks for the specific label
+    gt = (gt_mask == label).astype(np.float32)
+    pred = (pred_mask == label).astype(np.float32)
+
+    # Calculate precision and recall using provided definitions
+    precision = precision_score_(gt, pred)
+    recall = recall_score_(gt, pred)
+
+    # Calculate F1 score as the harmonic mean of precision and recall
+    if precision == 0 and recall == 0:
+        f1 = 0.0  # Avoid division by zero; F1 is 0 if both precision and recall are 0
+    else:
+        f1 = 2 * (precision * recall) / (precision + recall)
+
+    return round(f1, 3), precision, recall
 
 def dice_score_original(gt_mask, pred_mask, label=1):
     """
@@ -398,7 +465,7 @@ def plot_original_with_masks(original_image, upscaled_pred_mask, upscaled_gt_mas
     plt.axis('off')
     plt.show()
 
-    fig_legend = plt.figure(figsize=(8, 6))
+    fig_legend = plt.figure(figsize=(10, 6), dpi=300)
     ax_legend = fig_legend.add_subplot(111)
     ax_legend.axis('off')
 
@@ -652,6 +719,7 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                 dice_original_1= dice_score_original(original_gt_mask, original_pred_mask, label=1)
                 #dice_original_2= dice_score_original(original_gt_mask, original_pred_mask, label=2)
                 #dice_original_3= dice_score_original(original_gt_mask, original_pred_mask, label=3)
+                f1_original, precision, recall = segmentation_f1_score(original_gt_mask, original_pred_mask, label=1)
 
                 # Compare histograms of intensities in the segmented areas
                 gt_median_MD, pred_median_MD ,median_percentage_difference_MD  = histogram_comparison(original_gt_mask, original_pred_mask, original_image_MD, label=1)
@@ -683,6 +751,9 @@ def process_folders(pred_folder, gt_folder, main_folder, metrics_data, metrics_e
                     'Mean Percentage Difference Label 1 GT FA': median_percentage_difference_FA,
                     'Avg. HD Epi': avg_hausdorff_epi,
                     'Avg. HD Endo': avg_hausdorff_endo,
+                    'F1 Label 1' : f1_original,
+                    'Precision':precision,
+                    'Recall':recall,   
                     
 
                 }
