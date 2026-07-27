@@ -14,6 +14,47 @@ ground truth and against a second reader (inter-reader study).
 
 ---
 
+## 0. TL;DR — run two datasets and compare them (Dice + paper-style plots)
+
+Everything below lives on branch **`crop-alignment-and-hap-fixes`**.
+
+**Step 1 — run the pipeline once per model set.** Open `SmartHealthTestingHannum.ipynb`, set the
+three dataset IDs at the top of the config cell, run top to bottom:
+```python
+crop_yolo_id  = <YOLO crop dataset ID>     # -> runs/crop_D<id>
+rvip_yolo_id  = <YOLO RVIP dataset ID>     # resolves rvip_1c_D<id> / rvip_D<id>_0-0-0 / rvip_D<id>
+dataset_id_lv = <nnUNet LV dataset ID>     # e.g. 100 for run A, 102 for run B  (ResEnc-M, 5-fold ensemble)
+```
+Each run writes to an **ID-tagged output folder**
+`inferenceTest_SmartHealthTestHannum_crop<c>_rvip<r>_lv<l>/` containing per-case
+`..._yolo_avg.xlsx` **+ `.csv`**, and (from §8) its own `comparison/` folder with plots + CSVs.
+Runs never overwrite each other. Re-run with the second dataset's IDs.
+
+**Step 2 — compare the two runs.** Open `CompareApproaches.ipynb`, add one line per run to the
+`RUNS` dict (label -> that run's per-case `.xlsx`), run it. It writes to `comparisons/`:
+- `comparison_percase.csv`, `comparison_summary.csv` — **exact DSC / MD / FA / DWI / Hausdorff
+  numbers** (read these when the violins are too close to eyeball)
+- `dice_violin.png` — LV Dice by approach
+- `gtpred_MD.png` / `gtpred_FA.png` / `gtpred_DWI.png` — **paper-style split violins**
+  (`median_boxplot.ipynb` styling: grey GT left / coloured Pred right, `inner='quartile'`,
+  paired per-case connecting lines) ✅ ready to run
+- `ip_hausdorff_violin.png` — insertion-point accuracy
+
+Both notebooks share `comparison_plots.py` (`full_report(runs, out_dir)`), so styling/CSVs are
+identical whether you compare IP methods (inside one run) or LV models (across runs).
+
+**Files at a glance:** `SmartHealthTestingHannum.ipynb` (run the pipeline, tagged by IDs) ·
+`CompareApproaches.ipynb` (compare N runs) · `comparison_plots.py` (plots + CSV engine) ·
+`train_yolo_models.ipynb` (train/ablate YOLO by dataset ID) · `specific_split_combined.py`
+(merged SmartHealth + DirVsAverages split).
+
+⚠ Notebooks are JSON — editing the committed config cell conflicts on `git pull`. Prefer setting
+the IDs in a **new scratch cell right after** the config cell, or
+`git checkout origin/crop-alignment-and-hap-fixes -- <notebook>` (after `git fetch`) then reopen
+the file in the editor.
+
+---
+
 ## 1. High-level pipeline
 
 ```
@@ -301,10 +342,13 @@ The current `inference.ipynb` is the most complete end-to-end pipeline but is cr
 
 ## Open TODOs
 
-- [ ] Rebuild a clean `full_pipeline.ipynb` around the YOLO adapters + `hap_analysis`, with an
-      explicit **un-crop → original spacing** step (so HAP aligns with the eigenvector field).
-- [ ] Reconcile inference dataset IDs (60/61/62) → current trained models (100 + YOLO weights).
+- [x] Clean pipeline notebook (`SmartHealthTestingHannum.ipynb`) with the YOLO adapters,
+      un-crop to original spacing (via `process_folders`), tagged by crop+RVIP+LV dataset IDs.
+- [x] Comparison + paper-style Dice/MD/FA/DWI split violins + CSVs (`comparison_plots.py`,
+      `CompareApproaches.ipynb`, and `SmartHealthTestingHannum` §8).
+- [x] RVIP contrast ablation (`train_yolo_models.ipynb` §10) — result: single-contrast **avg
+      (0,0,0)** is the best YOLO RVIP detector; used for all IP methods.
+- [ ] Wire `hap_analysis.compare_gt_pred` (GT vs predicted mask) into the pipeline for the HAP
+      comparison; confirm it uses **HASF** and the mask is in original spacing before fitting.
 - [ ] Pin the exact "original data" source folder for the fair physical-value comparison.
-- [ ] Wire `compare_gt_pred` into the pipeline (GT mask → predicted mask, same code path).
-- [ ] Confirm HAP uses **HASF** and the mask is in original spacing before fitting.
-- [ ] Re-generate all three datasets after the `/√2` normalization change before the next runs.
+- [ ] Cork inter-reader run through the same `process_folders` + `comparison_plots` path.
