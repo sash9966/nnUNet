@@ -152,3 +152,52 @@ def full_report(runs, out_dir):
     gt_pred_violins(alldf, order, out_dir)
     print(f'\nsaved CSVs + PNGs to {out_dir}')
     return alldf, summary
+
+
+# ===========================================================================
+#  Per-case GT-vs-Prediction overlays (full view + cropped), LV mask + IPs
+#  Same colour convention as eval_util.plot_original_with_masks:
+#    GT   -> LV yellow, IP red (+ marker)      Pred -> LV cyan, IP blue (x marker)
+# ===========================================================================
+from matplotlib.colors import ListedColormap as _LC
+from matplotlib.patches import Patch as _Patch
+
+_PRED_CMAP = _LC([(0, 0, 0, 0), (0, 1, 1, 0.45), (0, 0, 1, 0.55), (0, 0, 1, 0.55)])  # bg, LV, IP2, IP3
+_GT_CMAP   = _LC([(0, 0, 0, 0), (1, 1, 0, 0.45), (1, 0, 0, 0.55), (1, 0, 0, 0.55)])
+_LEGEND = [_Patch(facecolor=(1, 1, 0, 0.6), label='GT LV'),
+           _Patch(facecolor=(0, 1, 1, 0.6), label='Pred LV'),
+           _Patch(facecolor=(1, 0, 0, 0.7), label='GT IP'),
+           _Patch(facecolor=(0, 0, 1, 0.7), label='Pred IP')]
+
+
+def _norm(img):
+    img = np.asarray(img, float)
+    lo, hi = np.nanmin(img), np.nanmax(img)
+    return (img - lo) / (hi - lo) if hi > lo else img
+
+
+def _ip_markers(ax, gt_mask, pred_mask):
+    from scipy.ndimage import center_of_mass
+    for lbl in (2, 3):
+        if np.any(gt_mask == lbl):
+            y, x = center_of_mass(gt_mask == lbl); ax.scatter(x, y, c='red', marker='+', s=90, linewidths=2)
+        if np.any(pred_mask == lbl):
+            y, x = center_of_mass(pred_mask == lbl); ax.scatter(x, y, c='blue', marker='x', s=70, linewidths=2)
+
+
+def save_case_overlay(out_png, full_img, full_gt, full_pred, crop_img, crop_gt, crop_pred, title=''):
+    """Two-panel GT-vs-pred overlay: full-FoV (original spacing) + cropped 256. Saves a PNG."""
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    for a, (im, gt, pr, sub) in zip(ax, [(full_img, full_gt, full_pred, 'full view (original spacing)'),
+                                         (crop_img, crop_gt, crop_pred, 'cropped 256')]):
+        a.imshow(_norm(im), cmap='gray')
+        a.imshow(np.ma.masked_where(gt == 0, gt), cmap=_GT_CMAP, vmin=0, vmax=3, interpolation='none')
+        a.imshow(np.ma.masked_where(pr == 0, pr), cmap=_PRED_CMAP, vmin=0, vmax=3, interpolation='none')
+        _ip_markers(a, gt, pr)
+        a.set_title(sub, fontsize=11); a.axis('off')
+    ax[0].legend(handles=_LEGEND, loc='lower right', fontsize=8, framealpha=0.6)
+    fig.suptitle(title, fontsize=12)
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(out_png), exist_ok=True)
+    plt.savefig(out_png, dpi=150, bbox_inches='tight'); plt.close(fig)
+    return out_png
