@@ -65,10 +65,29 @@ def _violin(ax, groups, labels, ylabel, title, ylim=None):
 
 
 def dice_violin(alldf, order, out_dir):
-    fig, ax = plt.subplots(figsize=(1.8 * len(order) + 3, 5))
-    _violin(ax, [alldf[alldf.approach == a][DICE].values for a in order], order,
-            'Dice (LV, label 1)', 'LV Dice — automatic vs GT, by approach', ylim=(0, 1))
-    plt.tight_layout(); p = os.path.join(out_dir, 'dice_violin.png'); plt.savefig(p, dpi=200); plt.show()
+    """LV Dice per approach, in the median_boxplot.ipynb paper aesthetic (seaborn, tab10,
+    inner quartiles, jittered per-case points, median annotated). Single distribution
+    (Dice already IS the GT-vs-pred agreement, so no split)."""
+    import seaborn as sns
+    d = alldf[['approach', DICE]].dropna()
+    approaches = [a for a in order if a in set(d['approach'].astype(str))]
+    colors = {a: plt.cm.tab10(i % 10) for i, a in enumerate(approaches)}
+
+    plt.figure(figsize=(2.2 * len(approaches) + 2, 4.5), dpi=300)
+    plt.title('LV Dice — automatic vs GT', fontsize=16)
+    sns.violinplot(x='approach', y=DICE, data=d, order=approaches, inner='quartile',
+                   palette=colors, cut=0, width=0.6)
+    for patch in plt.gca().collections:
+        patch.set_alpha(0.6); patch.set_edgecolor('black')
+    for idx, a in enumerate(approaches):
+        vals = d[d['approach'] == a][DICE].values
+        plt.scatter(np.full(len(vals), idx) + np.random.uniform(-0.08, 0.08, len(vals)), vals,
+                    color='black', s=12, alpha=0.6, zorder=3)
+        plt.text(idx, np.median(vals) + 0.015, f'{np.median(vals):.3f}', ha='center', va='bottom', fontsize=10)
+    plt.ylim(0, 1); plt.ylabel('Dice (LV, label 1)', fontsize=13); plt.xlabel('')
+    plt.xticks(fontsize=12, rotation=15, ha='right'); plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout(); p = os.path.join(out_dir, 'dice_violin.png')
+    plt.savefig(p, dpi=300); plt.show()
     return p
 
 
