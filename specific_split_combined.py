@@ -84,5 +84,18 @@ def specific_split_json_file(dataset_name):
 
 
 if __name__ == "__main__":
-    for dataset_name in ['Dataset111_HannumSmartHealthandDirVsAvgCrop']:
+    # Keep only the datasets you've actually generated (errors if the nnUNet_raw folder is missing).
+    # Same script for BOTH: combined -> SH cross-validated + all DirVsAvg in train, val = pure SH;
+    # SmartHealth-only -> 0 DirVsAvg cases -> a clean SH cross-validation. Identical folds + held-out
+    # test (volunteers 46-52) across all of them, so SmartHealth-vs-combined stays a fair comparison.
+    for dataset_name in [
+        # ----- combined (SmartHealth + DirVsAverages) -----
+        'Dataset300_HannumSmartHealthandDirVsAvgsLV',           # full 4-contrast LV
+        'Dataset301_HannumSmartHealthandDirVsAvgsIPs',          # full 4-contrast IP
+        'Dataset310_HannumSmartHealthandDirVsAvgsLVMDandAvg',   # avg+MD MVP LV
+        'Dataset311_HannumSmartHealthandDirVsAvgsIPsMDandAvg',  # avg+MD MVP IP
+        # ----- SmartHealth-only -----
+        'Dataset100_HannumSmarthHealthDataLV',
+        'Dataset105_HannumSmartHealthDataIPs',
+    ]:
         specific_split_json_file(dataset_name)
